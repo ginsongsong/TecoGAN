@@ -11,10 +11,7 @@ import tensorflow as tf
 from tensorflow.python.util import deprecation
 deprecation._PRINT_DEPRECATION_WARNINGS = False
 import random as rn
-
-#CV and scipy
-import cv2 as cv
-import scipy as signal
+import cv2
 
 # fix all randomness, except for multi-treading or GPU process
 os.environ['PYTHONHASHSEED'] = '0'
@@ -180,27 +177,14 @@ def testWhileTrain(FLAGS, testno = 0):
 if False: # If you want to take a look of the configuration, True
     print_configuration_op(FLAGS)
 
-
-##############################################################################################
 # the inference mode (just perform super resolution on the input image)
 if FLAGS.mode == 'inference':
     if FLAGS.checkpoint is None:
         raise ValueError('The checkpoint file is needed to performing the test.')
 
     # Declare the test data reader
-    cap=cv.VideoCapture(0)
-    fps = cap.get(cv.CAP_PROP_FPS)
-    cap.set(cv.CAP_PROP_FRAME_WIDTH, 360)
-    cap.set(cv.CAP_PROP_FRAME_HEIGHT, 240)
-    frame = cap.read()
-   
-    if cap.isOpened():
-       width = cap.get(3)
-       height = cap.get(4)
-	
     inference_data = inference_data_loader(FLAGS)
-    #input_shape = [1,] + list(inference_data.inputs[0].shape)
-    input_shape = [1, int(height),int(width),3] # N H W C
+    input_shape = [1,] + list(inference_data.inputs[0].shape)
     output_shape = [1,input_shape[1]*4, input_shape[2]*4, 3]
     oh = input_shape[1] - input_shape[1]//8 * 8
     ow = input_shape[2] - input_shape[2]//8 * 8
@@ -262,30 +246,30 @@ if FLAGS.mode == 'inference':
         weight_initiallizer.restore(sess, FLAGS.checkpoint)
         if False: # If you want to take a look of the weights, True
             printVariable('generator')
-
+            printVariable('fnet')
+        max_iter = len(inference_data.inputs)
+                
+        srtime = 0
         print('Frame evaluation starts!!')
-        while(cap.isOpened()):
-         start = time.time()
-         ret , frame = cap.read()
-         #input_im = np.array(frame.astype(np.float32))
-         frame =frame/ 255.0 #np.max(input_im)
-         input_im = np.expand_dims(frame.astype(np.float32),axis=0)
-         feed_dict={inputs_raw: input_im}
-         sess.run(before_ops, feed_dict=feed_dict)
-         output_frame = sess.run(outputs, feed_dict=feed_dict)
-         end = time.time()
-         seconds = end - start
-         cv.putText(output_frame[0],str(fps*seconds),(10,40),cv.FONT_HERSHEY_SIMPLEX,1, (0, 255, 255), 1, cv.LINE_AA)
-         cv.imshow("runtime result", output_frame[0])
-         frame = cv.resize(frame, (4* int(width), 4* int(height)), interpolation=cv.INTER_CUBIC)
-         cv.imshow("runtime src", frame)
-         
-         
-         if cv.waitKey(1) &0xFF ==ord('q'):
-                  break          
-				
-    #print( "total time " + str(srtime) + ", frame number " + str(max_iter) )    
-###############################################################################################       
+        for i in range(max_iter):
+            input_im = np.array([inference_data.inputs[i]]).astype(np.float32)
+            feed_dict={inputs_raw: input_im}
+            t0 = time.time()
+            if(i != 0):
+                sess.run(before_ops, feed_dict=feed_dict)
+            output_frame = sess.run(outputs, feed_dict=feed_dict)
+            srtime += time.time()-t0
+            
+            if(i >= 5): 
+                name, _ = os.path.splitext(os.path.basename(str(inference_data.paths_LR[i])))
+                filename = FLAGS.output_name+'_'+name
+                print('saving image %s' % filename)
+                out_path = os.path.join(image_dir, "%s.%s"%(filename,FLAGS.output_ext))
+                save_img(out_path, output_frame[0])
+            else:# First 5 is a hard-coded symmetric frame padding, ignored but time added!
+                print("Warming up %d"%(5-i))
+    print( "total time " + str(srtime) + ", frame number " + str(max_iter) )
+        
 # The training mode
 elif FLAGS.mode == 'train':
     # hard coded save
