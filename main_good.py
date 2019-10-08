@@ -11,19 +11,17 @@ import tensorflow as tf
 from tensorflow.python.util import deprecation
 deprecation._PRINT_DEPRECATION_WARNINGS = False
 import random as rn
-from screeninfo import get_monitors
+
 #CV and scipy
 import cv2 as cv
 import scipy as signal
-#Get Screeninfo
-
-
 
 # fix all randomness, except for multi-treading or GPU process
 os.environ['PYTHONHASHSEED'] = '0'
 np.random.seed(42)
 rn.seed(12345)
 tf.set_random_seed(1234)
+
 import tensorflow.contrib.slim as slim
 import sys, shutil, subprocess
 
@@ -179,52 +177,18 @@ def testWhileTrain(FLAGS, testno = 0):
     # ignore signals
     return subprocess.Popen(cmd1, preexec_fn = preexec)
     
-def crop_image(image, x, y, width, height):
-    """
-    image: a cv2 frame
-    x, y, width, height: the region to cut out
-    """
-    return image[y:y + height, x:x + width]
-    
-	   
 if False: # If you want to take a look of the configuration, True
     print_configuration_op(FLAGS)
 
 
 ##############################################################################################
 # the inference mode (just perform super resolution on the input image)
-#ROI Mouse Args
-rect = (0,0,0,0)
-startPoint = False
-endPoint = False
-
-def on_mouse(event,x,y,flags,params):
-
-    global rect,startPoint,endPoint
-
-    # get mouse click
-    if event == cv.EVENT_LBUTTONDOWN:
-
-        if startPoint == True and endPoint == True:
-            startPoint = False
-            endPoint = False
-            rect = (0, 0, 0, 0)
-
-        if startPoint == False:
-            rect = (x, y, 0, 0)
-            startPoint = True
-        elif endPoint == False:
-            rect = (rect[0], rect[1], x, y)
-            endPoint = True
-
-##
 if FLAGS.mode == 'inference':
     if FLAGS.checkpoint is None:
         raise ValueError('The checkpoint file is needed to performing the test.')
-    Zoom = 4
+
     # Declare the test data reader
     cap=cv.VideoCapture(0)
-    #cap=cv.VideoCapture("181180995.mp4")
     fps = cap.get(cv.CAP_PROP_FPS)
     cap.set(cv.CAP_PROP_FRAME_WIDTH, 360)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, 240)
@@ -237,7 +201,7 @@ if FLAGS.mode == 'inference':
     inference_data = inference_data_loader(FLAGS)
     #input_shape = [1,] + list(inference_data.inputs[0].shape)
     input_shape = [1, int(height),int(width),3] # N H W C
-    output_shape = [1,input_shape[1]*Zoom, input_shape[2]*Zoom, 3]
+    output_shape = [1,input_shape[1]*4, input_shape[2]*4, 3]
     oh = input_shape[1] - input_shape[1]//8 * 8
     ow = input_shape[2] - input_shape[2]//8 * 8
     paddings = tf.constant([[0,0], [0,oh], [0,ow], [0,0]])
@@ -263,7 +227,7 @@ if FLAGS.mode == 'inference':
     with tf.variable_scope('fnet'):
         gen_flow_lr = fnet( inputs_frames, reuse=False)
         gen_flow_lr = tf.pad(gen_flow_lr, paddings, "SYMMETRIC") 
-        gen_flow = upscale_four(gen_flow_lr*4.0) #Zoom?
+        gen_flow = upscale_four(gen_flow_lr*4.0)
         gen_flow.set_shape( output_shape[:-1]+[2] )
     pre_warp_hi = tf.contrib.image.dense_image_warp(pre_gen, gen_flow)
     before_ops = tf.assign(pre_warp, pre_warp_hi)
@@ -288,19 +252,10 @@ if FLAGS.mode == 'inference':
         image_dir = os.path.join(FLAGS.output_dir, FLAGS.output_pre)
     if not os.path.exists(image_dir):
         os.makedirs(image_dir)
-        
-    #ROI
-    # 是否显示网格 
-    #showCrosshair = False
-	# 如果为Ture的话 , 则鼠标的其实位置就作为了roi的中心
-	# False: 从左上角到右下角选中区域
-    #fromCenter = False
-    #cv.namedWindow("SuperRes", flags= cv.WINDOW_NORMAL | cv.WINDOW_FREERATIO)
-    #cv.namedWindow("Src", flags= cv.WINDOW_NORMAL | cv.WINDOW_FREERATIO)
-    #cv.namedWindow("runtime src", flags= cv.WINDOW_NORMAL | cv.WINDOW_FREERATIO)
     
-
-    
+    numMonitorX = 2
+    numMonitorY = 2
+           
     with tf.Session(config=config) as sess:
         # Load the pretrained model
         sess.run(init_op)
@@ -312,14 +267,6 @@ if FLAGS.mode == 'inference':
             printVariable('generator')
 	
         print('Frame evaluation starts!!')
-        
-        global MouseX 
-            
-        
-        MouseX=300
-        vis = np.zeros((int(height)*Zoom, int(width)*Zoom,3), np.uint8)
-        
-        
         while(cap.isOpened()):
          start = time.time()
          ret , frame = cap.read()
@@ -331,74 +278,14 @@ if FLAGS.mode == 'inference':
          output_frame = sess.run(outputs, feed_dict=feed_dict)
          end = time.time()
          seconds = end - start
+         cv.putText(output_frame[0],str(fps*seconds),(10,40),cv.FONT_HERSHEY_SIMPLEX,1, (0, 255, 255), 1, cv.LINE_AA)
+         cv.imshow("runtime result", output_frame[0])
+         frame = cv.resize(frame, (4* int(width), 4* int(height)), interpolation=cv.INTER_CUBIC)
+         cv.imshow("runtime src", frame)
+    
          
-         cv.putText(output_frame[0],"Our Algrithm Result",(10,40),cv.FONT_HERSHEY_SIMPLEX,1, (0, 0, 255), 2, cv.LINE_AA)
-         cv.putText(output_frame[0],str(fps*seconds),(10,80),cv.FONT_HERSHEY_SIMPLEX,1, (0, 255, 255), 1, cv.LINE_AA)
-         #cv.imshow("runtime result", output_frame[0])
-         
-         frame = cv.resize(frame, (Zoom* int(width), Zoom* int(height)), interpolation=cv.INTER_CUBIC)
-         cv.putText(frame,"180p Result",(10,int(MouseX)+40),cv.FONT_HERSHEY_SIMPLEX,1, (255, 0, 0), 2, cv.LINE_AA)
-         #cv.imshow("runtime src", frame)
-         
-         cv.namedWindow('runtime src',cv.WINDOW_AUTOSIZE)
-         #ROI image selected
-         #rect = cv.selectROI("runtime src", frame, showCrosshair, fromCenter)
-         #(x, y, w, h) = rect
-         #setROI
-         #SuperResImg=output_frame[0][y : y+h, x:x+w]
-         #SrcImg=frame[y : y+h, x:x+w]
-         #scale_percent = 200       # percent of original size
-         #width = int(SuperResImg.shape[1] * scale_percent / 100)
-         #height = int(SuperResImg.shape[0] * scale_percent / 100)
-         #dimForRoI = (width, height)
-         #SuperResImg = cv.resize(SuperResImg, dimForRoI, interpolation=cv.INTER_CUBIC)
-         #SrcImg =cv.resize(SrcImg, dimForRoI, interpolation=cv.INTER_CUBIC)
-         #cv.imshow("SuperRes",SuperResImg)
-         #cv.imshow("Src",SrcImg)
-         
-         
-         
-         #Multi-Screen
-         #for m in get_monitors():
-            # print(str(m))
-            # print(str(m.width))
-            # print(str(m.height))
-             #ROI Spaces
-             
-         cv.setMouseCallback('runtime src', on_mouse) 
-        
-           
-         #Top and buttom
-         roiA = output_frame[0][0:int(MouseX)][0:int(width)*Zoom]
-         roiB = frame[int(MouseX):int(width)*Zoom][0:int(width)*Zoom]
-         cv.resize(roiB,(int(width)*Zoom,int(height)*Zoom))
-         vis=np.concatenate((roiA, roiB), axis=0)
-         cv.line(vis, (0, int(MouseX)), (int(width)*4, int(MouseX)), (0, 255, 0), 5)
-         
-         if startPoint == True and endPoint == True:
-            cv.rectangle(vis, (rect[0], rect[1]), (rect[2], rect[3]), (255, 0, 123), 2)
-            SuperResImg=output_frame[0][rect[1] : rect[1]+rect[3], rect[0]:rect[0]+rect[2]]
-            SrcImg=frame[rect[1] : rect[1]+rect[3], rect[0]:rect[0]+rect[2]]
-            cv.imshow("Result SuperRes",SuperResImg)
-            cv.moveWindow('Result Src', rect[2] - 1, 0)
-            cv.imshow("Result Src",SrcImg)
-            
-         cv.imshow("runtime src", vis)
-       
-          
-         
-         k = cv.waitKey(33)
-         if k==113:    # Q key to stop
-                  break
-         elif k==97:  # normally -1 returned,so don't print it
-                  MouseX=MouseX+5
-                  continue
-         elif k==100:
-                  MouseX=MouseX-5
-                  continue
-                  
-         #if cv.waitKey(1) &0xFF ==ord('q'):
-                  #break          
+         if cv.waitKey(1) &0xFF ==ord('q'):
+                  break          
 				
     #print( "total time " + str(srtime) + ", frame number " + str(max_iter) )    
 ###############################################################################################       
